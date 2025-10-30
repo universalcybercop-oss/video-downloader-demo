@@ -1,0 +1,14 @@
+// replace the old fetchAndDownload() with:
+async function fetchAndDownload(url, filename) {
+  progress.classList.remove('hidden');
+  try {
+    const response = await fetch(`/api/direct-download?url=${encodeURIComponent(url)}`);
+    if (!response.ok) throw new Error("Server error " + response.status);
+    const blob = await response.blob();
+    triggerDownload(blob, filename);
+  } catch (e) {
+    alert("Download failed: " + e.message);
+  } finally {
+    progress.classList.add('hidden');
+  }
+}
