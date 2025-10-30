@@ -1,14 +1,260 @@
-// replace the old fetchAndDownload() with:
-async function fetchAndDownload(url, filename) {
-  progress.classList.remove('hidden');
-  try {
-    const response = await fetch(`/api/direct-download?url=${encodeURIComponent(url)}`);
-    if (!response.ok) throw new Error("Server error " + response.status);
-    const blob = await response.blob();
-    triggerDownload(blob, filename);
-  } catch (e) {
-    alert("Download failed: " + e.message);
-  } finally {
-    progress.classList.add('hidden');
-  }
-}
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>All Video Downloader — Demo</title>
+  <meta name="description" content="Demo: download (or simulate download) from URLs. Frontend-only." />
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    .progress-bar {
+      height: 6px;
+      background: linear-gradient(90deg,#3b82f6,#8b5cf6,#ec4899);
+      background-size:200% 100%;
+      animation: shimmer 2s linear infinite;
+    }
+    @keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+  </style>
+</head>
+<body class="bg-slate-50 text-slate-800 min-h-screen">
+  <header class="bg-white shadow-sm">
+    <div class="container mx-auto px-4 py-4 flex items-center justify-between">
+      <div class="flex items-center gap-3">
+        <i class="fas fa-download text-blue-500 text-2xl"></i>
+        <h1 class="text-lg font-semibold">All Video Downloader — Demo</h1>
+      </div>
+      <nav class="text-sm text-slate-600 hidden md:flex gap-6">
+        <a href="#home" class="hover:text-blue-600">Home</a>
+        <a href="#about" class="hover:text-blue-600">About</a>
+      </nav>
+    </div>
+  </header>
+
+  <main id="home" class="container mx-auto p-4 max-w-3xl">
+    <section class="bg-white rounded-xl shadow p-6 mt-6">
+      <h2 class="text-2xl font-bold mb-2">Paste a video link and download</h2>
+      <p class="text-sm text-slate-600 mb-4">For platform links (YouTube / Facebook / Twitter) this demo simulates a download. For direct file URLs (example.mp4) the page will attempt to fetch & download it.</p>
+
+      <div class="mb-4">
+        <label class="block text-sm font-medium mb-1">Video URL</label>
+        <div class="relative">
+          <input id="video-url" type="text" placeholder="Paste URL here..." class="w-full border rounded-lg px-4 py-2 focus:outline-none" />
+          <button id="paste-btn" class="absolute right-2 top-1/2 -translate-y-1/2 bg-slate-100 px-3 py-1 rounded text-sm hover:bg-slate-200">
+            <i class="fas fa-paste mr-1"></i> Paste
+          </button>
+        </div>
+        <p id="error" class="text-red-500 text-sm mt-2 hidden">Please enter a valid YouTube, Facebook, Twitter (X) link or a direct mp4/webm URL.</p>
+      </div>
+
+      <div class="flex gap-3 mb-4">
+        <button id="download-btn" class="flex-1 bg-blue-600 text-white rounded-lg py-2 font-medium hover:bg-blue-700">
+          <i class="fas fa-download mr-2"></i> Download
+        </button>
+        <button id="preview-btn" class="bg-slate-100 rounded-lg py-2 px-4 hover:bg-slate-200">
+          Preview
+        </button>
+      </div>
+
+      <div id="progress" class="hidden mt-4 rounded overflow-hidden">
+        <div class="progress-bar"></div>
+      </div>
+
+      <div id="preview-card" class="hidden mt-4 bg-slate-50 border rounded-lg p-4">
+        <div class="flex items-center gap-4">
+          <div class="w-28 h-16 bg-slate-200 rounded overflow-hidden flex items-center justify-center">
+            <img id="preview-thumb" src="" alt="thumb" class="w-full h-full object-cover hidden">
+            <i class="fas fa-play text-slate-500 text-2xl"></i>
+          </div>
+          <div>
+            <div id="preview-title" class="font-semibold">Title will appear here</div>
+            <div id="preview-duration" class="text-sm text-slate-600">Duration: —</div>
+            <div id="preview-info" class="text-xs text-slate-500 mt-1">Source: —</div>
+          </div>
+        </div>
+      </div>
+
+    </section>
+
+    <section id="about" class="mt-6 text-sm text-slate-600">
+      <h3 class="font-semibold mb-1">Notes & next steps</h3>
+      <ul class="list-disc pl-5 space-y-1">
+        <li>This demo does <strong>not</strong> implement a real downloader for YouTube/Facebook/Twitter — those require server-side code (eg. yt-dlp or a proxy) and legal checks.</li>
+        <li>If you want a real downloader: I can provide a secure backend example (Node.js + yt-dlp) and explain deployment, CORS & copyright considerations.</li>
+        <li>Direct file links (ending with <code>.mp4</code>, <code>.webm</code>, etc.) will be fetched and downloaded when CORS allows it.</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer class="mt-8 text-center text-xs text-slate-500 pb-8">
+    Demo — no real scraping provided. Use responsibly.
+  </footer>
+
+  <script>
+    const videoUrl = document.getElementById('video-url');
+    const pasteBtn = document.getElementById('paste-btn');
+    const downloadBtn = document.getElementById('download-btn');
+    const previewBtn = document.getElementById('preview-btn');
+    const errorEl = document.getElementById('error');
+    const progress = document.getElementById('progress');
+    const previewCard = document.getElementById('preview-card');
+    const previewThumb = document.getElementById('preview-thumb');
+    const previewTitle = document.getElementById('preview-title');
+    const previewDuration = document.getElementById('preview-duration');
+    const previewInfo = document.getElementById('preview-info');
+
+    // Paste from clipboard
+    pasteBtn.addEventListener('click', async () => {
+      try {
+        const t = await navigator.clipboard.readText();
+        videoUrl.value = t;
+      } catch (e) {
+        alert('Clipboard access failed — paste manually (Ctrl/Cmd+V).');
+      }
+    });
+
+    function detectPlatform(url) {
+      if (!url) return null;
+      const u = url.toLowerCase();
+      if (/youtube\.com|youtu\.be/.test(u)) return 'youtube';
+      if (/facebook\.com/.test(u)) return 'facebook';
+      if (/twitter\.com|x\.com/.test(u)) return 'twitter';
+      // direct file
+      if (/\.(mp4|webm|mkv|mov)(\?|$)/.test(u)) return 'direct-file';
+      return 'unknown';
+    }
+
+    function showError(msg) {
+      errorEl.textContent = msg || 'Invalid URL.';
+      errorEl.classList.remove('hidden');
+    }
+    function hideError(){ errorEl.classList.add('hidden'); }
+
+    // Try to fetch a direct file and download it (may fail because of CORS)
+    async function fetchAndDownload(url, filename) {
+      progress.classList.remove('hidden');
+      try {
+        const resp = await fetch(url);
+        if (!resp.ok) throw new Error('Network response not ok: ' + resp.status);
+        const blob = await resp.blob();
+        triggerDownload(blob, filename);
+      } catch (e) {
+        // CORS or network error: inform user
+        alert('Could not fetch file directly from browser — likely blocked by CORS or remote server. A backend proxy is required for real downloads.\n\nError: ' + e.message);
+      } finally {
+        progress.classList.add('hidden');
+      }
+    }
+
+    // Create fake mp4 blob and trigger download (demo)
+    function createDemoVideoAndDownload(filename = 'demo-video.mp4') {
+      progress.classList.remove('hidden');
+      // small text blob disguised as mp4 for demo (not a real playable video)
+      const content = 'Demo video file — replace with real backend download for actual videos.';
+      const blob = new Blob([content], { type: 'video/mp4' });
+      // small simulated delay so progress bar shows
+      setTimeout(() => {
+        triggerDownload(blob, filename);
+        progress.classList.add('hidden');
+      }, 1200);
+    }
+
+    function triggerDownload(blob, filename) {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    }
+
+    // Preview simulation (mock metadata)
+    function showPreviewFor(url) {
+      const platform = detectPlatform(url);
+      let data = { title: 'Unknown video', duration: '0:00', thumb: '', source: platform };
+      if (platform === 'youtube') {
+        data = { title: 'Sample YouTube Title (demo)', duration: '4:12', thumb: '', source: 'YouTube' };
+      } else if (platform === 'facebook') {
+        data = { title: 'Sample Facebook Video (demo)', duration: '2:05', thumb: '', source: 'Facebook' };
+      } else if (platform === 'twitter') {
+        data = { title: 'Sample X / Twitter Clip (demo)', duration: '0:58', thumb: '', source: 'Twitter (X)' };
+      } else if (platform === 'direct-file') {
+        const name = url.split('/').pop().split('?')[0];
+        data = { title: name, duration: '—', thumb: '', source: 'Direct file' };
+      } else {
+        data = { title: 'Preview not available for this URL', duration: '—', thumb: '', source: 'Unknown' };
+      }
+
+      previewTitle.textContent = data.title;
+      previewDuration.textContent = 'Duration: ' + data.duration;
+      previewInfo.textContent = 'Source: ' + data.source;
+      previewThumb.classList.add('hidden');
+      previewCard.classList.remove('hidden');
+      previewCard.scrollIntoView({ behavior: 'smooth' });
+    }
+
+    // Button handlers
+    previewBtn.addEventListener('click', () => {
+      const url = videoUrl.value.trim();
+      if (!url) { showError('Please paste a URL first.'); return; }
+      hideError();
+      showPreviewFor(url);
+    });
+
+    downloadBtn.addEventListener('click', async () => {
+      const url = videoUrl.value.trim();
+      if (!url) { showError('Please paste a URL first.'); return; }
+      hideError();
+      const platform = detectPlatform(url);
+
+      if (platform === 'direct-file') {
+        // Attempt to fetch and download the file directly
+        const filename = (url.split('/').pop().split('?')[0]) || 'file.mp4';
+        await fetchAndDownload(url, filename);
+        return;
+      }
+
+      // For known platforms: simulate or show friendly message
+      if (platform === 'youtube' || platform === 'facebook' || platform === 'twitter') {
+        // In a real app you would call your backend endpoint here, e.g.
+        // POST /api/fetch?url=... and receive a downloadable file blob or a presigned URL.
+        // This front-end demo will simulate by creating a demo file.
+        const confirmed = confirm("This demo can't download directly from YouTube/Facebook/Twitter in the browser.\n\nClick OK to download a demo placeholder file. If you want a real downloader, I can provide a server-side example (Node + yt-dlp).");
+        if (confirmed) {
+          createDemoVideoAndDownload(`${platform}-demo-video.mp4`);
+        }
+        return;
+      }
+
+      // Unknown URL: check basic scheme / maybe it is a direct resource but not ending with .mp4
+      if (/^https?:\/\//i.test(url)) {
+        // Try to fetch as a generic resource — may fail due to CORS
+        const filename = (new URL(url).pathname.split('/').pop() || 'download.bin');
+        const tryFetch = confirm('URL is not recognized as a known platform. Try to fetch the URL directly? (If blocked by CORS you will see an error)');
+        if (tryFetch) {
+          await fetchAndDownload(url, filename);
+        }
+        return;
+      }
+
+      // fallback
+      showError('Unrecognized URL format.');
+    });
+
+    // optional: press Enter to download
+    videoUrl.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        downloadBtn.click();
+      }
+    });
+
+    // initialize
+    (function init(){
+      // nothing yet
+    })();
+  </script>
+</body>
+</html>
